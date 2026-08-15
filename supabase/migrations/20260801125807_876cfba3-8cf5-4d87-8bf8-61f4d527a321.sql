@@ -1,0 +1,1 @@
+DELETE FROM public.stock_entries WHERE sheet_date = DATE '2026-08-02';

@@ -7,6 +7,16 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
+type RuntimeEnv = Record<string, unknown>;
+
+function applyRuntimeSecrets(env: unknown) {
+  if (!env || typeof env !== "object") return;
+  const lovableApiKey = (env as RuntimeEnv)["LOVABLE_API_KEY"];
+  if (typeof lovableApiKey === "string" && lovableApiKey.length > 0) {
+    process.env["LOVABLE_API_KEY"] = lovableApiKey;
+  }
+}
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
 async function getServerEntry(): Promise<ServerEntry> {
@@ -47,6 +57,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      applyRuntimeSecrets(env);
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

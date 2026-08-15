@@ -1,0 +1,607 @@
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRightLeft, Calendar as CalendarIcon, Camera, Download, FileText, Minus, Plus, Printer, Share2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import {
+  GROUPS,
+  type ColKey,
+  type Row,
+  type SheetValues,
+  dateKey,
+  displayCell,
+  
+  rolloverValues,
+  thaiParts,
+} from "@/lib/stock-sheet";
+import { fetchSheet, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
+import { compressImage } from "@/lib/image-compress";
+import { scanReceiptFn } from "@/lib/receipt-scan.functions";
+import type { ScanKey } from "@/lib/receipt-scan-items";
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+const RAW_COLS: ColKey[] = ["oz16", "oz22", "oz32", "carry", "received", "used", "remain"];
+const FRONT_COLS: ColKey[] = ["frontCarry", "frontIn", "sold", "frontRemain"];
+const SHADED: ColKey[] = ["remain", "frontRemain"];
+const COUNTERS: { id: string; label: string; img: string }[] = [
+  { id: "nes-nescafe-red", label: "เนสกาแฟ ริช อโรมา แดง", img: "/images/nescafe-red.png" },
+  { id: "nes-nescafe-green", label: "เนสกาแฟ เอสเปรสโซ โรสต์ เขียว", img: "/images/nescafe-green.png" },
+];
+
+/** ปุ่มบวก/ลบแบบแถวละ 3 อัน (ค่าเริ่มต้นลงช่องยอดขาย) */
+const TRIO_COUNTERS: { id: string; label: string; col?: ColKey }[] = [
+  { id: "eq-cup-16", label: "แก้ว 16 ออนซ์" },
+  { id: "eq-cup-22", label: "แก้ว 22 ออนซ์" },
+  { id: "eq-cup-32", label: "แก้ว 32 ออนซ์" },
+  { id: "nes-ice-16", label: "น้ำแข็งเปล่า 16 ออนซ์", col: "oz16" },
+  { id: "eq-water", label: "น้ำทิพย์" },
+  { id: "can-coke", label: "โค้ก กระป๋อง" },
+  { id: "can-coke-zero", label: "โค้กซีโร่ กระป๋อง" },
+  { id: "can-red", label: "แฟนต้าแดง กระป๋อง" },
+  { id: "can-green", label: "แฟนต้าเขียว กระป๋อง" },
+  { id: "can-orange", label: "แฟนต้าส้ม กระป๋อง" },
+  { id: "can-sprite", label: "สไปรท์ กระป๋อง" },
+  { id: "can-schweppes", label: "ชเวปส์" },
+  { id: "can-grape", label: "แฟนต้าองุ่น" },
+];
+
+
+/** รายการที่อนุญาตให้เติมยอดขายจากการถ่ายใบสรุปยอด */
+const SCAN_TO_ROW: Record<ScanKey, string> = {
+  promotion: "tnt-promotion",
+  canCoke: "can-coke",
+  canCokeZero: "can-coke-zero",
+  canRed: "can-red",
+  canGreen: "can-green",
+  canOrange: "can-orange",
+  canSprite: "can-sprite",
+  canSchweppes: "can-schweppes",
+  canGrape: "can-grape",
+  canMinutemaid: "can-minutemaid",
+  water: "eq-water",
+  
+  cup16: "eq-cup-16",
+  cup22: "eq-cup-22",
+  cup32: "eq-cup-32",
+  ice16: "nes-ice-16",
+};
+
+
+
+export function StockSheet() {
+  const [date, setDate] = useState(() => startOfDay(new Date()));
+  const [values, setValues] = useState<SheetValues>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  const pendingRows = useRef<Set<string>>(new Set());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const valuesRef = useRef<SheetValues>({});
+
+  valuesRef.current = values;
+
+  // โหลดข้อมูลจากฐานข้อมูลกลาง + ฟังการอัปเดตแบบเรียลไทม์
+  useEffect(() => {
+    let alive = true;
+    setSyncing(true);
+    fetchSheet(date)
+      .then((remote) => {
+        if (!alive) return;
+        setValues(remote);
+      })
+      .catch(() => {
+        if (alive) toast.error("โหลดข้อมูลจากเซิร์ฟเวอร์ไม่สำเร็จ");
+      })
+      .finally(() => {
+        if (alive) setSyncing(false);
+      });
+
+    const unsubscribe = subscribeSheet(date, (rowId, cells) => {
+      if (pendingRows.current.has(rowId)) return; // กำลังพิมพ์แถวนี้อยู่ อย่าเขียนทับ
+      setValues((prev) => ({ ...prev, [rowId]: cells }));
+    });
+
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [date]);
+
+  const flush = useCallback(
+    async (d: Date) => {
+      const rowIds = [...pendingRows.current];
+      if (!rowIds.length) return;
+      pendingRows.current.clear();
+      try {
+        await Promise.all(rowIds.map((id) => saveRow(d, id, valuesRef.current[id] ?? {})));
+      } catch {
+        toast.error("บันทึกขึ้นเซิร์ฟเวอร์ไม่สำเร็จ");
+      }
+    },
+    [],
+  );
+
+  const setCell = (rowId: string, col: ColKey, raw: string) => {
+    const v = raw.replace(/[^\d.-]/g, "");
+    setValues((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [col]: v } }));
+    pendingRows.current.add(rowId);
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(() => void flush(date), 500);
+  };
+
+  /** บวก/ลบค่าในช่อง (คำนวณจากค่าล่าสุดเสมอ กันกดรัวแล้วเลขไม่ตาม) */
+  const bumpCells = (targets: { rowId: string; col: ColKey }[], delta: number) => {
+    setValues((prev) => {
+      const next = { ...prev };
+      for (const t of targets) {
+        const cur = Number(next[t.rowId]?.[t.col] ?? "") || 0;
+        next[t.rowId] = { ...next[t.rowId], [t.col]: String(Math.max(0, cur + delta)) };
+      }
+      return next;
+    });
+    targets.forEach((t) => pendingRows.current.add(t.rowId));
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(() => void flush(date), 500);
+  };
+
+
+  // ถ่ายรูปใบสรุปยอด -> เติมยอดขายเฉพาะรายการที่กำหนด
+  const handleReceipt = async (file: File) => {
+    setScanning(true);
+    const tid = toast.loading("กำลังอ่านใบสรุปยอด...");
+    try {
+      const image = await compressImage(file);
+      const result = await scanReceiptFn({ data: { image } });
+      const sold: Record<string, number> = {};
+      for (const [key, qty] of Object.entries(result)) {
+        if (key === "ice16") continue; // น้ำแข็งเปล่าลงช่อง 16 OZ. ไม่ใช่ยอดขาย
+        const rowId = SCAN_TO_ROW[key as ScanKey];
+        if (!rowId || !qty) continue;
+        sold[rowId] = (sold[rowId] ?? 0) + qty;
+      }
+      // น้ำแข็งเปล่า 16 ออนซ์ ต้องบวกเข้าไปในยอดขายแก้ว 16 ออนซ์ด้วย
+      const ice = result.ice16 ?? 0;
+      if (ice) sold["eq-cup-16"] = (sold["eq-cup-16"] ?? 0) + ice;
+
+
+      const rowIds = Object.keys(sold);
+      if (!rowIds.length && !ice) {
+        toast.error("อ่านตัวเลขจากรูปไม่ได้ ลองถ่ายให้ชัดขึ้นครับ", { id: tid });
+        return;
+      }
+      setValues((prev) => {
+        const next = { ...prev };
+        for (const id of rowIds) next[id] = { ...prev[id], sold: String(sold[id]) };
+        if (ice) next["nes-ice-16"] = { ...next["nes-ice-16"], oz16: String(ice) };
+        return next;
+      });
+      rowIds.forEach((id) => pendingRows.current.add(id));
+      if (ice) pendingRows.current.add("nes-ice-16");
+
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      flushTimer.current = setTimeout(() => void flush(date), 300);
+      toast.success(`เติมยอดขายจากใบสรุปแล้ว ${rowIds.length} รายการ`, { id: tid });
+    } catch (error) {
+      const msg = error instanceof Error && error.message ? error.message : "";
+      toast.error(msg && msg.length < 120 ? msg : "อ่านใบสรุปยอดไม่สำเร็จ ลองอีกครั้งครับ", {
+        id: tid,
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+
+  const parts = thaiParts(date);
+
+
+  const handleRollover = async () => {
+    await flush(date);
+    // แก้ว 9 ออนซ์ใช้ยอดขายกาแฟที่คำนวณอัตโนมัติ จึงต้องใส่ค่านี้ก่อนโยกยอด
+    // ไม่เช่นนั้นระบบจะโยกจากข้อมูลดิบที่ไม่มียอดขายและคงค่าเดิมข้ามวัน
+    const rolloverSource: SheetValues = {
+      ...values,
+      "eq-cup-9": { ...values["eq-cup-9"], sold: cupNineSold() },
+    };
+    const next = rolloverValues(rolloverSource);
+    const nextDate = startOfDay(new Date(date.getTime() + 86_400_000));
+    try {
+      const existing = await fetchSheet(nextDate);
+      const merged: SheetValues = { ...next };
+      for (const [rowId, cells] of Object.entries(existing)) {
+        merged[rowId] = { ...next[rowId], ...cells };
+      }
+      await saveSheetRows(nextDate, merged);
+      setDate(nextDate);
+      setReminderOpen(true);
+      toast.success("โยกสต็อกไปวันถัดไปแล้ว");
+    } catch {
+      toast.error("โยกสต็อกไม่สำเร็จ");
+    }
+  };
+
+
+  const exportImage = async () => {
+    const el = sheetRef.current;
+    if (!el) return null;
+    const { default: html2canvas } = await import("html2canvas-pro");
+    return html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+  };
+
+  const handlePng = async () => {
+    setExporting(true);
+    try {
+      const canvas = await exportImage();
+      if (!canvas) return;
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `stock-${dateKey(date)}.png`;
+      a.click();
+      toast.success("บันทึกไฟล์ PNG แล้ว");
+    } catch {
+      toast.error("บันทึก PNG ไม่สำเร็จ");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handlePdf = async () => {
+    setExporting(true);
+    try {
+      const canvas = await exportImage();
+      if (!canvas) return;
+      const { default: jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const ratio = Math.min(pw / canvas.width, ph / canvas.height);
+      const w = canvas.width * ratio;
+      const h = canvas.height * ratio;
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", (pw - w) / 2, 12, w, h - 24);
+      pdf.save(`stock-${dateKey(date)}.pdf`);
+      toast.success("บันทึกไฟล์ PDF แล้ว");
+    } catch {
+      toast.error("บันทึก PDF ไม่สำเร็จ");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    setExporting(true);
+    try {
+      const canvas = await exportImage();
+      if (!canvas) return;
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("no blob");
+      const file = new File([blob], `stock-${dateKey(date)}.png`, { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `แบบบันทึก STOCK วัตถุดิบ ${parts.day} ${parts.month} ${parts.year}`,
+        });
+      } else {
+        await handlePng();
+      }
+    } catch {
+      /* ผู้ใช้ยกเลิกการแชร์ */
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ยอดขายแก้ว 9 ออนซ์ = ยอดขายกาแฟซองแดง + เขียว
+  const cupNineSold = () => {
+    const red = values["nes-nescafe-red"]?.sold ?? "";
+    const green = values["nes-nescafe-green"]?.sold ?? "";
+    if (!red.trim() && !green.trim()) return "";
+    return String((Number(red) || 0) + (Number(green) || 0));
+  };
+
+  const cell = (row: Row, col: ColKey) => {
+    const derived = row.id === "eq-cup-9" && col === "sold";
+    // แก้ว 9 ออนซ์: คงเหลือหน้าร้านต้องหักยอดขายที่คำนวณจากกาแฟด้วย
+    const nineFrontRemain = row.id === "eq-cup-9" && col === "frontRemain";
+    let value: string;
+    if (derived) {
+      value = cupNineSold();
+    } else if (nineFrontRemain) {
+      const cells = { ...(values[row.id] ?? {}), sold: cupNineSold() };
+      value = displayCell(row, cells, col);
+    } else {
+      value = displayCell(row, values[row.id], col);
+    }
+    return (
+      <td key={col} className={`sheet-td p-0 ${SHADED.includes(col) ? "bg-sheet-shade" : ""}`}>
+        <input
+          inputMode="decimal"
+          readOnly={derived}
+          value={value}
+          onChange={(e) => {
+            if (!derived) setCell(row.id, col, e.target.value);
+          }}
+          className={`sheet-input ${SHADED.includes(col) ? "font-semibold" : ""}`}
+        />
+      </td>
+    );
+  };
+
+
+
+  return (
+    <div className="mx-auto max-w-[1180px] px-3 py-6 sm:px-6 print:max-w-none print:p-0">
+      <div className="mb-4 flex flex-wrap items-center gap-2 print:hidden">
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline">
+              <CalendarIcon className="size-4" />
+              {`${parts.day} ${parts.month} ${parts.year}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={date}
+              onSelect={(d) => {
+                if (!d) return;
+                setDate(startOfDay(d));
+                setPickerOpen(false);
+              }}
+              defaultMonth={date}
+            />
+          </PopoverContent>
+        </Popover>
+
+        {syncing && <span className="text-xs text-muted-foreground">กำลังซิงค์ข้อมูล…</span>}
+
+        <Button onClick={handleRollover} disabled={exporting || syncing}>
+          <ArrowRightLeft className="size-4" /> โยกสต็อกและเปลี่ยนวัน
+        </Button>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) void handleReceipt(f);
+          }}
+        />
+        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={scanning}>
+          <Camera className="size-4" /> {scanning ? "กำลังอ่านใบสรุป…" : "ถ่ายใบสรุปยอด"}
+        </Button>
+
+
+        <div className="ms-auto flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={handleShare} disabled={exporting}>
+            <Share2 className="size-4" /> แชร์
+          </Button>
+          <Button variant="secondary" onClick={() => window.print()} disabled={exporting}>
+            <Printer className="size-4" /> ปริ้น
+          </Button>
+          <Button variant="secondary" onClick={handlePng} disabled={exporting}>
+            <Download className="size-4" /> PNG
+          </Button>
+          <Button variant="secondary" onClick={handlePdf} disabled={exporting}>
+            <FileText className="size-4" /> PDF
+          </Button>
+        </div>
+      </div>
+
+      <p className="mb-3 text-xs text-muted-foreground print:hidden">
+        กรอกตัวเลขได้ทุกช่อง ระบบคำนวณสต็อกคงเหลือให้อัตโนมัติหลังกรอกยอดเบิกใช้ และนำยอดเบิกใช้ไปใส่
+        “สินค้าเข้าหน้าร้าน” ให้เอง กด “โยกสต็อกและเปลี่ยนวัน” เพื่อยกยอดคงเหลือไปเป็นสต็อกยกมาของวันถัดไป
+      </p>
+
+      <div className="overflow-x-auto rounded-lg border border-sheet-line bg-paper shadow-sheet print:overflow-visible print:rounded-none print:border-0 print:shadow-none">
+        <div ref={sheetRef} className="print-sheet min-w-[1040px] bg-paper p-5 print:p-0">
+          <div className="flex items-start gap-4">
+            <img src="/images/logo.png" alt="Big C สระบุรี" className="h-20 w-auto object-contain" />
+            <header className="flex-1 text-center leading-relaxed">
+              <h1 className="text-lg font-semibold tracking-wide">แบบบันทึก STOCK วัตถุดิบ</h1>
+              <p className="text-base">ฝ่ายพลาซ่า สาขา สระบุรี</p>
+              <p className="text-base">
+                ประจำวันที่ <span className="mx-1 font-semibold underline">{parts.day}</span>
+                เดือน <span className="mx-1 font-semibold underline">{parts.month}</span>
+                ปี <span className="mx-1 font-semibold underline">{parts.year}</span>
+              </p>
+            </header>
+            <div className="h-20 w-20 shrink-0" aria-hidden />
+          </div>
+
+          <table className="mt-4 w-full border-collapse text-center text-[14px]">
+            <thead>
+              <tr>
+                <th rowSpan={2} className="sheet-th w-[112px]">
+                  Supplier
+                </th>
+                <th rowSpan={2} className="sheet-th w-[170px]">
+                  รายการสินค้า
+                </th>
+                <th rowSpan={2} className="sheet-th w-[64px]">
+                  หน่วยนับ
+                </th>
+                <th colSpan={3} className="sheet-th">
+                  วัตถุดิบ
+                </th>
+                <th colSpan={8} className="sheet-th">
+                  รวมจำนวนสินค้า
+                </th>
+              </tr>
+              <tr>
+                <th className="sheet-th">16 OZ.</th>
+                <th className="sheet-th">22 OZ.</th>
+                <th className="sheet-th">32 OZ.</th>
+                <th className="sheet-th">สต็อคยกมา</th>
+                <th className="sheet-th">รับเข้า</th>
+                <th className="sheet-th">เบิกใช้</th>
+                <th className="sheet-th bg-sheet-shade">สต็อคคงเหลือ</th>
+                <th className="sheet-th">สต็อคยกมาหน้าร้าน</th>
+                <th className="sheet-th">สินค้าเข้าหน้าร้าน</th>
+                <th className="sheet-th">ยอดขาย</th>
+                <th className="sheet-th bg-sheet-shade">สต็อคคงเหลือหน้าร้าน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {GROUPS.map((group) => {
+                return (
+                  <Fragment key={group.supplier}>
+                    {group.rows.map((row, i) => (
+                      <tr key={row.id}>
+                        {i === 0 && (
+                          <td
+                            rowSpan={group.rows.length}
+                            className="sheet-td align-top text-start font-medium"
+                          >
+                            {group.supplier}
+                          </td>
+                        )}
+                        <td
+                          colSpan={row.spanUnit ? 2 : 1}
+                          className={`sheet-td text-start ${row.italic ? "italic" : ""}`}
+                        >
+                          {row.names ? (
+                            <div className="flex flex-col gap-0.5">
+                              {row.names.map((n) => (
+                                <span key={n}>{n}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            row.name
+                          )}
+                        </td>
+                        {!row.spanUnit && (
+                          <td className="sheet-td text-muted-foreground">{row.unit}</td>
+                        )}
+                        {RAW_COLS.map((col) => cell(row, col))}
+                        {FRONT_COLS.map((col) => cell(row, col))}
+                      </tr>
+                    ))}
+                    {group.showTotal && (
+                      <tr className="bg-sheet-shade font-semibold">
+                        <td className="sheet-td" colSpan={2}>
+                          รวม
+                        </td>
+                        <td className="sheet-td" colSpan={11} />
+                      </tr>
+                    )}
+                    {group.showGrandTotal && (
+                      <tr className="bg-sheet-shade font-bold">
+                        <td className="sheet-td" colSpan={2}>
+                          ยอดรวมสุทธิ
+                        </td>
+                        <td className="sheet-td" colSpan={11} />
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div className="mt-4 grid grid-cols-1 gap-2 text-[12px] sm:grid-cols-3">
+            {["ผู้รายงาน", "ผู้ตรวจสอบ (ฝ่ายพลาซ่า)", "ผู้ตรวจสอบ (ฝ่ายบัญชี)"].map((label) => (
+              <div key={label} className="border border-sheet-line px-2 py-3">
+                <span>{label}</span>
+                <div className="mt-4 border-t border-dashed border-sheet-line" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 print:hidden">
+        {COUNTERS.map((c) => {
+          const current = Number(values[c.id]?.sold ?? "") || 0;
+          const step = (delta: number) => bumpCells([{ rowId: c.id, col: "sold" }], delta);
+
+          return (
+            <div
+              key={c.id}
+              className="rounded-lg border border-sheet-line bg-paper p-5 text-center shadow-sheet"
+            >
+              <img
+                src={c.img}
+                alt={c.label}
+                className="mx-auto mb-3 h-40 w-40 object-contain"
+                loading="lazy"
+              />
+              <p className="mb-3 text-lg font-bold">{c.label}</p>
+
+              <div className="flex items-center justify-center gap-5">
+                <Button variant="outline" size="icon" className="size-12" onClick={() => step(-1)} aria-label="ลด">
+                  <Minus className="size-6" />
+                </Button>
+                <span className="min-w-20 text-4xl font-extrabold tabular-nums text-sheet-ink">{current}</span>
+                <Button variant="outline" size="icon" className="size-12" onClick={() => step(1)} aria-label="เพิ่ม">
+                  <Plus className="size-6" />
+                </Button>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">เด้งไปช่องยอดขายอัตโนมัติ</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 print:hidden">
+        {TRIO_COUNTERS.map((c) => {
+          const col = c.col ?? "sold";
+          const current = Number(values[c.id]?.[col] ?? "") || 0;
+          const step = (delta: number) => {
+            const targets: { rowId: string; col: ColKey }[] = [{ rowId: c.id, col }];
+            // น้ำแข็งเปล่า 16 ออนซ์ ใช้แก้วเดียวกัน -> บวกเข้ายอดขายแก้ว 16 ออนซ์ด้วย
+            if (c.id === "nes-ice-16") targets.push({ rowId: "eq-cup-16", col: "sold" });
+            bumpCells(targets, delta);
+          };
+
+          return (
+            <div
+              key={c.id}
+              className="rounded-lg border border-sheet-line bg-paper p-3 text-center shadow-sheet"
+            >
+              <p className="mb-2 text-base font-bold leading-tight">{c.label}</p>
+              <div className="flex items-center justify-center gap-3">
+                <Button variant="outline" size="icon" className="size-10" onClick={() => step(-1)} aria-label="ลด">
+                  <Minus className="size-5" />
+                </Button>
+                <span className="min-w-12 text-3xl font-extrabold tabular-nums text-sheet-ink">
+                  {current}
+                </span>
+                <Button variant="outline" size="icon" className="size-10" onClick={() => step(1)} aria-label="เพิ่ม">
+                  <Plus className="size-5" />
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {c.col === "oz16" ? "เด้งไปช่อง 16 OZ." : "เด้งไปช่องยอดขาย"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
+        <DialogContent className="max-w-md overflow-hidden p-0 sm:max-w-lg">
+          <img
+            src="/closing-reminder.jpg"
+            alt=""
+            className="block h-auto w-full rounded-lg"
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
