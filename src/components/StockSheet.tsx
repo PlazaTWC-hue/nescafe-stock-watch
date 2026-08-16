@@ -67,6 +67,8 @@ const SCAN_TO_ROW: Record<ScanKey, string> = {
 export function StockSheet() {
   const [date, setDate] = useState(() => startOfDay(new Date()));
   const [values, setValues] = useState<SheetValues>({});
+  const [waterAdd, setWaterAdd] = useState("");
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(true);
