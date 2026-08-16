@@ -38,16 +38,8 @@ const TRIO_COUNTERS: { id: string; label: string; col?: ColKey }[] = [
   { id: "eq-cup-22", label: "แก้ว 22 ออนซ์" },
   { id: "eq-cup-32", label: "แก้ว 32 ออนซ์" },
   { id: "nes-ice-16", label: "น้ำแข็งเปล่า 16 ออนซ์", col: "oz16" },
-  { id: "eq-water", label: "น้ำทิพย์" },
-  { id: "can-coke", label: "โค้ก กระป๋อง" },
-  { id: "can-coke-zero", label: "โค้กซีโร่ กระป๋อง" },
-  { id: "can-red", label: "แฟนต้าแดง กระป๋อง" },
-  { id: "can-green", label: "แฟนต้าเขียว กระป๋อง" },
-  { id: "can-orange", label: "แฟนต้าส้ม กระป๋อง" },
-  { id: "can-sprite", label: "สไปรท์ กระป๋อง" },
-  { id: "can-schweppes", label: "ชเวปส์" },
-  { id: "can-grape", label: "แฟนต้าองุ่น" },
 ];
+
 
 
 /** รายการที่อนุญาตให้เติมยอดขายจากการถ่ายใบสรุปยอด */
