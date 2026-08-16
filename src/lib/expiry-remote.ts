@@ -22,9 +22,9 @@ export const fetchExpiryItems = async (): Promise<ExpiryItem[]> => {
   return ((data ?? []) as RawRow[])
     .map((r) => ({
       id: r.row_id,
-      name: r.cells?.name ?? "",
-      received: r.cells?.received ?? "",
-      expiry: r.cells?.expiry ?? "",
+      name: r.cells?.["name"] ?? "",
+      received: r.cells?.["received"] ?? "",
+      expiry: r.cells?.["expiry"] ?? "",
     }))
     .sort((a, b) => a.expiry.localeCompare(b.expiry));
 };
