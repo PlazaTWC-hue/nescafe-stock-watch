@@ -584,6 +584,44 @@ export function StockSheet() {
         })}
       </div>
 
+      <div className="mt-3 print:hidden">
+        <div className="rounded-lg border border-sheet-line bg-paper p-4 shadow-sheet">
+          <p className="mb-1 text-base font-bold">เบิกน้ำทิพย์ (ทยอยเบิก)</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            ใส่จำนวนที่เบิกเพิ่ม แล้วกดยืนยัน ระบบจะบวกเข้าช่อง “เบิกใช้” และหักสต๊อกหลังร้านให้อัตโนมัติ
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              inputMode="numeric"
+              value={waterAdd}
+              onChange={(e) => setWaterAdd(e.target.value.replace(/[^\d]/g, ""))}
+              placeholder="จำนวนขวด"
+              className="h-11 w-32 rounded-md border border-sheet-line bg-transparent px-3 text-lg font-bold tabular-nums outline-none"
+            />
+            <Button
+              className="h-11"
+              onClick={() => {
+                const n = Number(waterAdd) || 0;
+                if (!n) return;
+                bumpCells([{ rowId: "eq-water", col: "used" }], n);
+                setWaterAdd("");
+                toast.success(`เบิกน้ำทิพย์เพิ่ม ${n} ขวด`);
+              }}
+            >
+              ยืนยัน
+            </Button>
+            <span className="ml-auto text-sm text-muted-foreground">
+              เบิกใช้วันนี้รวม{" "}
+              <b className="text-2xl tabular-nums text-sheet-ink">
+                {Number(values["eq-water"]?.used ?? "") || 0}
+              </b>{" "}
+              ขวด
+            </span>
+          </div>
+        </div>
+      </div>
+
+
       <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
         <DialogContent className="max-w-md overflow-hidden p-0 sm:max-w-lg">
           <img
