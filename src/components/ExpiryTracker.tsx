@@ -274,8 +274,8 @@ export function ExpiryTracker() {
                       return (
                         <tr key={it.id} className="border-b border-sheet-line/60">
                           <td className="py-2 font-medium">{it.name}</td>
-                          <td className="py-2 tabular-nums">{thaiDate(it.received)}</td>
-                          <td className="py-2 tabular-nums">{thaiDate(it.expiry)}</td>
+                          <td className="py-2 tabular-nums">{fmtDate(it.received)}</td>
+                          <td className="py-2 tabular-nums">{fmtDate(it.expiry)}</td>
                           <td className="py-2">
                             <span className={`rounded px-2 py-1 text-xs font-bold tabular-nums ${statusClass(n)}`}>
                               {n < 0 ? `หมดอายุแล้ว ${Math.abs(n)} วัน` : `${n} วัน`}
