@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -263,8 +263,8 @@ export function ExpiryTracker() {
               </thead>
               <tbody>
                 {grouped.map(([cat, list]) => (
-                  <>
-                    <tr key={`h-${cat}`} className="bg-muted/50">
+                  <Fragment key={cat}>
+                    <tr className="bg-muted/50">
                       <td colSpan={5} className="py-1.5 text-xs font-bold">
                         {cat}
                       </td>
@@ -295,7 +295,7 @@ export function ExpiryTracker() {
                         </tr>
                       );
                     })}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
