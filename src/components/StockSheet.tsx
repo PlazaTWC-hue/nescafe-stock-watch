@@ -18,6 +18,7 @@ import {
   thaiParts,
 } from "@/lib/stock-sheet";
 import { fetchSheet, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
+import { ExpiryTracker } from "@/components/ExpiryTracker";
 import { compressImage } from "@/lib/image-compress";
 import { scanReceiptFn } from "@/lib/receipt-scan.functions";
 import type { ScanKey } from "@/lib/receipt-scan-items";
@@ -32,13 +33,6 @@ const COUNTERS: { id: string; label: string; img: string }[] = [
   { id: "nes-nescafe-green", label: "เนสกาแฟ เอสเปรสโซ โรสต์ เขียว", img: "/images/nescafe-green.png" },
 ];
 
-/** ปุ่มบวก/ลบแบบแถวละ 3 อัน (ค่าเริ่มต้นลงช่องยอดขาย) */
-const TRIO_COUNTERS: { id: string; label: string; col?: ColKey }[] = [
-  { id: "eq-cup-16", label: "แก้ว 16 ออนซ์" },
-  { id: "eq-cup-22", label: "แก้ว 22 ออนซ์" },
-  { id: "eq-cup-32", label: "แก้ว 32 ออนซ์" },
-  { id: "nes-ice-16", label: "น้ำแข็งเปล่า 16 ออนซ์", col: "oz16" },
-];
 
 
 
@@ -550,42 +544,6 @@ export function StockSheet() {
         })}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 print:hidden">
-        {TRIO_COUNTERS.map((c) => {
-          const col = c.col ?? "sold";
-          const current = Number(values[c.id]?.[col] ?? "") || 0;
-          const step = (delta: number) => {
-            const targets: { rowId: string; col: ColKey }[] = [{ rowId: c.id, col }];
-            // น้ำแข็งเปล่า 16 ออนซ์ ใช้แก้วเดียวกัน -> บวกเข้ายอดขายแก้ว 16 ออนซ์ด้วย
-            if (c.id === "nes-ice-16") targets.push({ rowId: "eq-cup-16", col: "sold" });
-            bumpCells(targets, delta);
-          };
-
-          return (
-            <div
-              key={c.id}
-              className="rounded-lg border border-sheet-line bg-paper p-3 text-center shadow-sheet"
-            >
-              <p className="mb-2 text-base font-bold leading-tight">{c.label}</p>
-              <div className="flex items-center justify-center gap-3">
-                <Button variant="outline" size="icon" className="size-10" onClick={() => step(-1)} aria-label="ลด">
-                  <Minus className="size-5" />
-                </Button>
-                <span className="min-w-12 text-3xl font-extrabold tabular-nums text-sheet-ink">
-                  {current}
-                </span>
-                <Button variant="outline" size="icon" className="size-10" onClick={() => step(1)} aria-label="เพิ่ม">
-                  <Plus className="size-5" />
-                </Button>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {c.col === "oz16" ? "เด้งไปช่อง 16 OZ." : "เด้งไปช่องยอดขาย"}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
       <div className="mt-3 print:hidden">
         <div className="rounded-lg border border-sheet-line bg-paper p-4 shadow-sheet">
           <p className="mb-1 text-base font-bold">เบิกน้ำทิพย์ (ทยอยเบิก)</p>
@@ -623,6 +581,8 @@ export function StockSheet() {
         </div>
       </div>
 
+
+      <ExpiryTracker />
 
       <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
         <DialogContent className="max-w-md overflow-hidden p-0 sm:max-w-lg">
