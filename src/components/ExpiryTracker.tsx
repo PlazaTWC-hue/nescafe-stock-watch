@@ -32,11 +32,11 @@ const todayKey = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const thaiDate = (iso: string) => {
+const fmtDate = (iso: string) => {
   if (!iso) return "-";
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
-  return `${d} ${THAI_MONTHS[m - 1]} ${y + 543}`;
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
 };
 
 const daysLeft = (iso: string) => {
