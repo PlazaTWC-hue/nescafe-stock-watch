@@ -6,7 +6,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import closingReminder from "@/assets/closing-reminder-v2.png.asset.json";
+const CLOSING_REMINDER_URL =
+  "/__l5e/assets-v1/99fef259-94e6-49d4-b73b-51fcc74a2781/closing-reminder-v2.png";
 import {
   GROUPS,
   type ColKey,
