@@ -247,7 +247,7 @@ export function ExpiryTracker() {
     <div className="mt-3 print:hidden">
       <Dialog open={alertOpen}>
         <DialogContent
-          showCloseButton={false}
+          className="max-w-lg [&>button]:hidden"
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
