@@ -1,8 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BellRing, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { sendLineAlert } from "@/lib/line-notify.functions";
 import {
   EXPIRY_CATEGORIES,
   deleteExpiryItem,
@@ -11,6 +13,7 @@ import {
   sortExpiryItems,
   type ExpiryItem,
 } from "@/lib/expiry-remote";
+
 
 const THAI_MONTHS = [
   "ม.ค.",
@@ -147,10 +150,141 @@ export function ExpiryTracker() {
     }
   };
 
-  const alerts = items.filter((i) => daysLeft(i.expiry) <= warnDays);
+  const alerts = useMemo(
+    () =>
+      sortExpiryItems(items.filter((i) => daysLeft(i.expiry) <= warnDays)).sort(
+        (a, b) => daysLeft(a.expiry) - daysLeft(b.expiry),
+      ),
+    [items, warnDays],
+  );
+
+  const buildMessage = useCallback(
+    (list: ExpiryItem[]) => {
+      const lines = list.map((i) => {
+        const n = daysLeft(i.expiry);
+        return `• ${i.name} (${i.category}) หมดอายุ ${fmtDate(i.expiry)} — ${n < 0 ? `หมดอายุแล้ว ${Math.abs(n)} วัน` : `เหลือ ${n} วัน`}`;
+      });
+      return `⚠️ แจ้งเตือนของใกล้หมดอายุ (${fmtDate(todayKey())})\nรวม ${list.length} รายการ\n${lines.join("\n")}`;
+    },
+    [],
+  );
+
+  const pushLine = useCallback(
+    async (list: ExpiryItem[], quiet = true) => {
+      if (list.length === 0) return;
+      try {
+        const res = await sendLineAlert({ data: { message: buildMessage(list) } });
+        if (!res.ok && !quiet) {
+          toast.error(
+            res.reason === "missing-config"
+              ? "ยังไม่ได้ตั้งค่าไลน์ (LINE_CHANNEL_ACCESS_TOKEN / LINE_GROUP_ID)"
+              : "ส่งเข้าไลน์กลุ่มไม่สำเร็จ",
+          );
+        } else if (res.ok && !quiet) {
+          toast.success("ส่งแจ้งเตือนเข้าไลน์กลุ่มแล้ว");
+        }
+      } catch {
+        if (!quiet) toast.error("ส่งเข้าไลน์กลุ่มไม่สำเร็จ");
+      }
+    },
+    [buildMessage],
+  );
+
+  /** ป๊อปอัพเที่ยงคืน: เด้งอัตโนมัติวันละครั้ง ปิดไม่ได้จนกว่าจะกดรับทราบ */
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertList, setAlertList] = useState<ExpiryItem[]>([]);
+  const [isTest, setIsTest] = useState(false);
+  const loadedRef = useRef(false);
+
+  const ackKey = "expiry-alert-ack";
+
+  const runDailyCheck = useCallback(() => {
+    if (alerts.length === 0) return;
+    let ack = "";
+    try {
+      ack = localStorage.getItem(ackKey) ?? "";
+    } catch {
+      /* ignore */
+    }
+    if (ack === todayKey()) return;
+    setAlertList(alerts);
+    setIsTest(false);
+    setAlertOpen(true);
+    void pushLine(alerts);
+  }, [alerts, pushLine]);
+
+  useEffect(() => {
+    if (items.length === 0 || loadedRef.current) return;
+    loadedRef.current = true;
+    runDailyCheck();
+  }, [items, runDailyCheck]);
+
+  useEffect(() => {
+    const id = window.setInterval(runDailyCheck, 60_000);
+    return () => window.clearInterval(id);
+  }, [runDailyCheck]);
+
+  const acknowledge = () => {
+    if (!isTest) {
+      try {
+        localStorage.setItem(ackKey, todayKey());
+      } catch {
+        /* ignore */
+      }
+    }
+    setAlertOpen(false);
+  };
+
+  const testAlert = () => {
+    const list = alerts.length > 0 ? alerts : sortExpiryItems(items).slice(0, 5);
+    setAlertList(list);
+    setIsTest(true);
+    setAlertOpen(true);
+    void pushLine(list, false);
+  };
 
   return (
     <div className="mt-3 print:hidden">
+      <Dialog open={alertOpen}>
+        <DialogContent
+          className="max-w-lg [&>button]:hidden"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          
+        >
+          <div className="space-y-3">
+            <p className="text-lg font-bold text-destructive">
+              {isTest ? "ทดสอบแจ้งเตือน — " : ""}สินค้าใกล้หมดอายุ ({alertList.length} รายการ)
+            </p>
+            <p className="text-xs text-muted-foreground">
+              หน้าต่างนี้จะไม่ปิดจนกว่าจะกดรับทราบ (กะเช้าตรวจสอบแล้วกดปิด)
+            </p>
+            <div className="max-h-[50vh] space-y-1 overflow-y-auto">
+              {alertList.map((i) => {
+                const n = daysLeft(i.expiry);
+                return (
+                  <div
+                    key={i.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-sheet-line px-3 py-2 text-sm"
+                  >
+                    <span className="font-medium">
+                      {i.name} <span className="text-xs text-muted-foreground">({i.category})</span>
+                    </span>
+                    <span className={`rounded px-2 py-1 text-xs font-bold tabular-nums ${statusClass(n)}`}>
+                      {fmtDate(i.expiry)} · {n < 0 ? `หมดอายุแล้ว ${Math.abs(n)} วัน` : `${n} วัน`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <Button className="h-11 w-full" onClick={acknowledge}>
+              รับทราบ / ปิดหน้าต่าง
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="rounded-lg border border-sheet-line bg-paper p-4 shadow-sheet">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
@@ -159,10 +293,17 @@ export function ExpiryTracker() {
               แยกตามหมวด กล่อง / กระป๋อง / ถุง / กระบอก เรียงเหมือนใบสต๊อก
             </p>
           </div>
-          <Button size="icon" className="size-10 shrink-0" onClick={() => setOpen((v) => !v)} aria-label="เพิ่มรายการ">
-            <Plus className="size-5" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" className="h-10 gap-1 text-xs" onClick={testAlert}>
+              <BellRing className="size-4" />
+              เทสแจ้งเตือน
+            </Button>
+            <Button size="icon" className="size-10" onClick={() => setOpen((v) => !v)} aria-label="เพิ่มรายการ">
+              <Plus className="size-5" />
+            </Button>
+          </div>
         </div>
+
 
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md bg-muted/40 px-3 py-2 text-xs">
           <span className="font-bold">แจ้งเตือนล่วงหน้า</span>
