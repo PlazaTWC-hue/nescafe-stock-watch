@@ -587,7 +587,7 @@ export function StockSheet() {
       <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
         <DialogContent className="max-w-md overflow-hidden p-0 sm:max-w-lg">
           <img
-            src="/closing-reminder.jpg"
+            src={closingReminder.url}
             alt=""
             className="block h-auto w-full rounded-lg"
           />
