@@ -251,7 +251,7 @@ export function ExpiryTracker() {
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
-          className="max-w-lg"
+          
         >
           <div className="space-y-3">
             <p className="text-lg font-bold text-destructive">
