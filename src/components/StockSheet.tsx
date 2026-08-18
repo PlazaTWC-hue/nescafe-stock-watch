@@ -6,6 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import closingReminder from "@/assets/closing-reminder-v2.png.asset.json";
 import {
   GROUPS,
   type ColKey,
@@ -587,7 +588,7 @@ export function StockSheet() {
       <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
         <DialogContent className="max-w-md overflow-hidden p-0 sm:max-w-lg">
           <img
-            src="/closing-reminder.jpg"
+            src={closingReminder.url}
             alt=""
             className="block h-auto w-full rounded-lg"
           />
