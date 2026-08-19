@@ -210,7 +210,7 @@ export function ExpiryTracker() {
     setAlertList(alerts);
     setIsTest(false);
     setAlertOpen(true);
-    void pushLine(alerts);
+    void pushLine(alerts, false);
   }, [alerts, pushLine]);
 
   useEffect(() => {
