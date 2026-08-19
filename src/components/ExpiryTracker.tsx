@@ -62,8 +62,8 @@ export function ExpiryTracker() {
   const [received, setReceived] = useState(todayKey());
   const [expiry, setExpiry] = useState("");
   /** แจ้งเตือน 2 ช่วง: เตือนแรก (สีเหลือง) และเตือนด่วน (สีแดง) */
-  const [warnDays, setWarnDays] = useState(60);
-  const [urgentDays, setUrgentDays] = useState(14);
+  const [warnDays, setWarnDays] = useState(30);
+  const [urgentDays, setUrgentDays] = useState(7);
 
   useEffect(() => {
     fetchExpiryItems()
