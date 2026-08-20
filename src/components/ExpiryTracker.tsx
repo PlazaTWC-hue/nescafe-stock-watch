@@ -272,7 +272,7 @@ export function ExpiryTracker() {
     setAlertList(list);
     setIsTest(true);
     setAlertOpen(true);
-    void pushLine(list, false);
+    void pushLine(list, "test", false);
   };
 
   return (
