@@ -375,6 +375,50 @@ export function ExpiryTracker() {
           </span>
         </div>
 
+        <div className="mb-3 rounded-md border border-sheet-line/70 px-3 py-2 text-xs">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="font-bold">ประวัติการส่งแจ้งเตือนเข้าไลน์</span>
+            {logs.length > 0 && (
+              <button
+                type="button"
+                className="text-muted-foreground underline"
+                onClick={() => {
+                  setLogs([]);
+                  try {
+                    localStorage.removeItem(LOG_KEY);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                ล้างประวัติ
+              </button>
+            )}
+          </div>
+          {logs.length === 0 ? (
+            <p className="text-muted-foreground">ยังไม่มีการส่ง</p>
+          ) : (
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {logs.map((l, idx) => (
+                <div key={`${l.at}-${idx}`} className="flex items-center justify-between gap-2">
+                  <span className="tabular-nums text-muted-foreground">{fmtTime(l.at)}</span>
+                  <span>{l.kind === "test" ? "เทสแจ้งเตือน" : "แจ้งเตือนประจำวัน"} · {l.count} รายการ</span>
+                  <span
+                    className={`rounded px-2 py-0.5 font-bold ${l.ok ? "bg-emerald-500/15 text-emerald-700" : "bg-destructive/15 text-destructive"}`}
+                  >
+                    {l.ok ? "สำเร็จ" : "ไม่สำเร็จ"}
+                  </span>
+                </div>
+              ))}
+              <p className="pt-1 text-[11px] text-muted-foreground">
+                ล่าสุด: {logs[0]?.detail}
+              </p>
+            </div>
+          )}
+        </div>
+
+
+
         {open && (
           <div className="mb-3 grid gap-2 rounded-md border border-dashed border-sheet-line p-3 sm:grid-cols-4">
             <input
