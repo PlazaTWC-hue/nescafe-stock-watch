@@ -53,6 +53,21 @@ const daysLeft = (iso: string) => {
 
 const ALERT_OPTIONS = [7, 14, 30, 60, 90, 180];
 const STORE_KEY = "expiry-alert-days";
+const LOG_KEY = "expiry-line-log";
+
+type LineLog = {
+  at: string;
+  kind: "test" | "daily";
+  count: number;
+  ok: boolean;
+  detail: string;
+};
+
+const fmtTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
 
 export function ExpiryTracker() {
   const [items, setItems] = useState<ExpiryItem[]>([]);
@@ -64,6 +79,7 @@ export function ExpiryTracker() {
   /** แจ้งเตือน 2 ช่วง: เตือนแรก (สีเหลือง) และเตือนด่วน (สีแดง) */
   const [warnDays, setWarnDays] = useState(30);
   const [urgentDays, setUrgentDays] = useState(7);
+  const [logs, setLogs] = useState<LineLog[]>([]);
 
   useEffect(() => {
     fetchExpiryItems()
@@ -77,6 +93,8 @@ export function ExpiryTracker() {
         if (p.warn) setWarnDays(p.warn);
         if (p.urgent) setUrgentDays(p.urgent);
       }
+      const savedLog = localStorage.getItem(LOG_KEY);
+      if (savedLog) setLogs(JSON.parse(savedLog) as LineLog[]);
     } catch {
       /* ignore */
     }
@@ -169,26 +187,43 @@ export function ExpiryTracker() {
     [],
   );
 
+  const addLog = useCallback((entry: LineLog) => {
+    setLogs((prev) => {
+      const next = [entry, ...prev].slice(0, 20);
+      try {
+        localStorage.setItem(LOG_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   const pushLine = useCallback(
-    async (list: ExpiryItem[], quiet = true) => {
+    async (list: ExpiryItem[], kind: LineLog["kind"], quiet = true) => {
       if (list.length === 0) return;
+      const base = { at: new Date().toISOString(), kind, count: list.length };
       try {
         const res = await sendLineAlert({ data: { message: buildMessage(list) } });
-        if (!res.ok && !quiet) {
-          toast.error(
+        if (!res.ok) {
+          const detail =
             res.reason === "missing-config"
               ? "ยังไม่ได้ตั้งค่าไลน์ (LINE_CHANNEL_ACCESS_TOKEN / LINE_GROUP_ID)"
-              : "ส่งเข้าไลน์กลุ่มไม่สำเร็จ",
-          );
-        } else if (res.ok && !quiet) {
-          toast.success("ส่งแจ้งเตือนเข้าไลน์กลุ่มแล้ว");
+              : "ส่งเข้าไลน์กลุ่มไม่สำเร็จ";
+          addLog({ ...base, ok: false, detail });
+          if (!quiet) toast.error(detail);
+        } else {
+          addLog({ ...base, ok: true, detail: "ส่งสำเร็จ" });
+          if (!quiet) toast.success("ส่งแจ้งเตือนเข้าไลน์กลุ่มแล้ว");
         }
       } catch {
+        addLog({ ...base, ok: false, detail: "เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ" });
         if (!quiet) toast.error("ส่งเข้าไลน์กลุ่มไม่สำเร็จ");
       }
     },
-    [buildMessage],
+    [buildMessage, addLog],
   );
+
 
   /** ป๊อปอัพเที่ยงคืน: เด้งอัตโนมัติวันละครั้ง ปิดไม่ได้จนกว่าจะกดรับทราบ */
   const [alertOpen, setAlertOpen] = useState(false);
@@ -210,7 +245,7 @@ export function ExpiryTracker() {
     setAlertList(alerts);
     setIsTest(false);
     setAlertOpen(true);
-    void pushLine(alerts, false);
+    void pushLine(alerts, "daily", false);
   }, [alerts, pushLine]);
 
   useEffect(() => {
@@ -240,7 +275,7 @@ export function ExpiryTracker() {
     setAlertList(list);
     setIsTest(true);
     setAlertOpen(true);
-    void pushLine(list, false);
+    void pushLine(list, "test", false);
   };
 
   return (
@@ -339,6 +374,50 @@ export function ExpiryTracker() {
             ใกล้หมดอายุ <b className="text-sheet-ink">{alerts.length}</b> รายการ
           </span>
         </div>
+
+        <div className="mb-3 rounded-md border border-sheet-line/70 px-3 py-2 text-xs">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="font-bold">ประวัติการส่งแจ้งเตือนเข้าไลน์</span>
+            {logs.length > 0 && (
+              <button
+                type="button"
+                className="text-muted-foreground underline"
+                onClick={() => {
+                  setLogs([]);
+                  try {
+                    localStorage.removeItem(LOG_KEY);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                ล้างประวัติ
+              </button>
+            )}
+          </div>
+          {logs.length === 0 ? (
+            <p className="text-muted-foreground">ยังไม่มีการส่ง</p>
+          ) : (
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {logs.map((l, idx) => (
+                <div key={`${l.at}-${idx}`} className="flex items-center justify-between gap-2">
+                  <span className="tabular-nums text-muted-foreground">{fmtTime(l.at)}</span>
+                  <span>{l.kind === "test" ? "เทสแจ้งเตือน" : "แจ้งเตือนประจำวัน"} · {l.count} รายการ</span>
+                  <span
+                    className={`rounded px-2 py-0.5 font-bold ${l.ok ? "bg-emerald-500/15 text-emerald-700" : "bg-destructive/15 text-destructive"}`}
+                  >
+                    {l.ok ? "สำเร็จ" : "ไม่สำเร็จ"}
+                  </span>
+                </div>
+              ))}
+              <p className="pt-1 text-[11px] text-muted-foreground">
+                ล่าสุด: {logs[0]?.detail}
+              </p>
+            </div>
+          )}
+        </div>
+
+
 
         {open && (
           <div className="mb-3 grid gap-2 rounded-md border border-dashed border-sheet-line p-3 sm:grid-cols-4">
