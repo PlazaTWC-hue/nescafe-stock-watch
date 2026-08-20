@@ -79,6 +79,7 @@ export function ExpiryTracker() {
   /** แจ้งเตือน 2 ช่วง: เตือนแรก (สีเหลือง) และเตือนด่วน (สีแดง) */
   const [warnDays, setWarnDays] = useState(30);
   const [urgentDays, setUrgentDays] = useState(7);
+  const [logs, setLogs] = useState<LineLog[]>([]);
 
   useEffect(() => {
     fetchExpiryItems()
@@ -92,6 +93,8 @@ export function ExpiryTracker() {
         if (p.warn) setWarnDays(p.warn);
         if (p.urgent) setUrgentDays(p.urgent);
       }
+      const savedLog = localStorage.getItem(LOG_KEY);
+      if (savedLog) setLogs(JSON.parse(savedLog) as LineLog[]);
     } catch {
       /* ignore */
     }
