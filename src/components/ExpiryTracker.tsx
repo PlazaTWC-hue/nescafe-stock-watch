@@ -53,6 +53,21 @@ const daysLeft = (iso: string) => {
 
 const ALERT_OPTIONS = [7, 14, 30, 60, 90, 180];
 const STORE_KEY = "expiry-alert-days";
+const LOG_KEY = "expiry-line-log";
+
+type LineLog = {
+  at: string;
+  kind: "test" | "daily";
+  count: number;
+  ok: boolean;
+  detail: string;
+};
+
+const fmtTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
 
 export function ExpiryTracker() {
   const [items, setItems] = useState<ExpiryItem[]>([]);
