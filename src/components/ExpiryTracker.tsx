@@ -242,7 +242,7 @@ export function ExpiryTracker() {
     setAlertList(alerts);
     setIsTest(false);
     setAlertOpen(true);
-    void pushLine(alerts, false);
+    void pushLine(alerts, "daily", false);
   }, [alerts, pushLine]);
 
   useEffect(() => {
