@@ -169,26 +169,43 @@ export function ExpiryTracker() {
     [],
   );
 
+  const addLog = useCallback((entry: LineLog) => {
+    setLogs((prev) => {
+      const next = [entry, ...prev].slice(0, 20);
+      try {
+        localStorage.setItem(LOG_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   const pushLine = useCallback(
-    async (list: ExpiryItem[], quiet = true) => {
+    async (list: ExpiryItem[], kind: LineLog["kind"], quiet = true) => {
       if (list.length === 0) return;
+      const base = { at: new Date().toISOString(), kind, count: list.length };
       try {
         const res = await sendLineAlert({ data: { message: buildMessage(list) } });
-        if (!res.ok && !quiet) {
-          toast.error(
+        if (!res.ok) {
+          const detail =
             res.reason === "missing-config"
               ? "ยังไม่ได้ตั้งค่าไลน์ (LINE_CHANNEL_ACCESS_TOKEN / LINE_GROUP_ID)"
-              : "ส่งเข้าไลน์กลุ่มไม่สำเร็จ",
-          );
-        } else if (res.ok && !quiet) {
-          toast.success("ส่งแจ้งเตือนเข้าไลน์กลุ่มแล้ว");
+              : "ส่งเข้าไลน์กลุ่มไม่สำเร็จ";
+          addLog({ ...base, ok: false, detail });
+          if (!quiet) toast.error(detail);
+        } else {
+          addLog({ ...base, ok: true, detail: "ส่งสำเร็จ" });
+          if (!quiet) toast.success("ส่งแจ้งเตือนเข้าไลน์กลุ่มแล้ว");
         }
       } catch {
+        addLog({ ...base, ok: false, detail: "เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ" });
         if (!quiet) toast.error("ส่งเข้าไลน์กลุ่มไม่สำเร็จ");
       }
     },
-    [buildMessage],
+    [buildMessage, addLog],
   );
+
 
   /** ป๊อปอัพเที่ยงคืน: เด้งอัตโนมัติวันละครั้ง ปิดไม่ได้จนกว่าจะกดรับทราบ */
   const [alertOpen, setAlertOpen] = useState(false);
