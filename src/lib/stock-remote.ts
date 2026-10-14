@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 
-import { dateKey, type SheetValues } from "./stock-sheet";
+import { dateKey, type LayoutEntry, type SheetValues } from "./stock-sheet";
 
 type EntryRow = {
   sheet_date: string;
@@ -69,4 +69,26 @@ export const subscribeSheet = (
   return () => {
     supabase.removeChannel(channel);
   };
+};
+
+/** การตั้งค่ารายการสินค้า เก็บในวันที่คงที่ (แถว cfg-*) */
+const LAYOUT_DATE = "2026-10-01";
+
+export const fetchLayout = async (): Promise<LayoutEntry[]> => {
+  const { data, error } = await supabase
+    .from("stock_entries")
+    .select("row_id,cells")
+    .eq("sheet_date", LAYOUT_DATE);
+  if (error) throw error;
+  return ((data ?? []) as { row_id: string; cells: Record<string, string> | null }[])
+    .filter((r) => r.row_id.startsWith("cfg-"))
+    .map((r) => ({ ...(r.cells ?? {}), id: r.row_id.slice(4) }));
+};
+
+export const saveLayoutEntry = async (e: LayoutEntry) => {
+  const { id, ...cells } = e;
+  const { error } = await supabase
+    .from("stock_entries")
+    .upsert({ sheet_date: LAYOUT_DATE, row_id: `cfg-${id}`, cells }, { onConflict: "sheet_date,row_id" });
+  if (error) throw error;
 };

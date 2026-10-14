@@ -164,10 +164,26 @@ export const displayCell = (row: Row, r: Cells | undefined, col: ColKey): string
   return r?.[col] ?? "";
 };
 
+/** การปรับรายการสินค้า: เพิ่มรายการใหม่ / ซ่อนรายการเดิม (ใช้ร่วมกันทุกเครื่อง) */
+export type LayoutEntry = { id: string; g?: string; n?: string; u?: string; x?: string };
+
+export const buildGroups = (layout: LayoutEntry[]): Group[] => {
+  const removed = new Set(layout.filter((l) => l.x === "1").map((l) => l.id));
+  return GROUPS.map((g, gi) => ({
+    ...g,
+    rows: [
+      ...g.rows,
+      ...layout
+        .filter((l) => l.g === String(gi) && l.n)
+        .map((l) => ({ id: l.id, name: l.n!, unit: l.u || "ชิ้น", countFront: true }) as Row),
+    ].filter((r) => !removed.has(r.id)),
+  }));
+};
+
 /** โยกสต็อกไปวันถัดไป: คงเหลือ -> ยกมา, คงเหลือหน้าร้าน -> ยกมาหน้าร้าน */
-export const rolloverValues = (values: SheetValues): SheetValues => {
+export const rolloverValues = (values: SheetValues, rows: Row[] = ALL_ROWS): SheetValues => {
   const next: SheetValues = {};
-  for (const row of ALL_ROWS) {
+  for (const row of rows) {
     const cur = values[row.id];
     if (!cur) continue;
     const stock = remainStock(cur, row);
