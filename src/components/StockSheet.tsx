@@ -97,7 +97,7 @@ export function StockSheet() {
   };
 
   const addItem = (gi: number) => {
-    const n = window.prompt(`เพิ่มรายการในหมวด "${GROUPS[gi].supplier}"\nชื่อสินค้า:`)?.trim();
+    const n = window.prompt(`เพิ่มรายการในหมวด "${GROUPS[gi]?.supplier ?? ""}"\nชื่อสินค้า:`)?.trim();
     if (!n) return;
     const u = window.prompt("หน่วย (เช่น ขวด, กล่อง, ใบ):", "ชิ้น")?.trim() || "ชิ้น";
     void updateLayout({
