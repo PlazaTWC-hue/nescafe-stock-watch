@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Calendar as CalendarIcon, Camera, Download, FileText, Minus, Plus, Printer, Share2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRightLeft, Calendar as CalendarIcon, Camera, Download, FileText, Minus, Plus, Printer, Share2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -10,16 +10,17 @@ const CLOSING_REMINDER_URL =
   "/__l5e/assets-v1/99fef259-94e6-49d4-b73b-51fcc74a2781/closing-reminder-v2.png";
 import {
   GROUPS,
+  buildGroups,
   type ColKey,
+  type LayoutEntry,
   type Row,
   type SheetValues,
   dateKey,
   displayCell,
-  
   rolloverValues,
   thaiParts,
 } from "@/lib/stock-sheet";
-import { fetchSheet, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
+import { fetchLayout, fetchSheet, saveLayoutEntry, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
 import { ExpiryTracker } from "@/components/ExpiryTracker";
 import { compressImage } from "@/lib/image-compress";
 import { scanReceiptFn } from "@/lib/receipt-scan.functions";
@@ -78,6 +79,41 @@ export function StockSheet() {
   const valuesRef = useRef<SheetValues>({});
 
   valuesRef.current = values;
+
+  // รายการสินค้าที่เพิ่ม/ลบเอง (ใช้ร่วมกันทุกเครื่อง)
+  const [layout, setLayout] = useState<LayoutEntry[]>([]);
+  useEffect(() => {
+    fetchLayout().then(setLayout).catch(() => toast.error("โหลดรายการสินค้าไม่สำเร็จ"));
+  }, []);
+  const groups = useMemo(() => buildGroups(layout), [layout]);
+
+  const updateLayout = async (e: LayoutEntry) => {
+    setLayout((prev) => [...prev.filter((l) => l.id !== e.id), e]);
+    try {
+      await saveLayoutEntry(e);
+    } catch {
+      toast.error("บันทึกรายการสินค้าไม่สำเร็จ");
+    }
+  };
+
+  const addItem = (gi: number) => {
+    const n = window.prompt(`เพิ่มรายการในหมวด "${GROUPS[gi].supplier}"\nชื่อสินค้า:`)?.trim();
+    if (!n) return;
+    const u = window.prompt("หน่วย (เช่น ขวด, กล่อง, ใบ):", "ชิ้น")?.trim() || "ชิ้น";
+    void updateLayout({
+      id: `c${Date.now().toString(36)}`,
+      g: String(gi),
+      n: n.slice(0, 32),
+      u: u.slice(0, 32),
+    });
+    toast.success(`เพิ่ม "${n}" แล้ว`);
+  };
+
+  const removeItem = (row: Row) => {
+    if (!window.confirm(`ลบรายการ "${row.name}" ออกจากตาราง?`)) return;
+    const own = layout.find((l) => l.id === row.id);
+    void updateLayout({ ...(own ?? { id: row.id }), x: "1" });
+  };
 
   // โหลดข้อมูลจากฐานข้อมูลกลาง + ฟังการอัปเดตแบบเรียลไทม์
   useEffect(() => {
@@ -202,7 +238,7 @@ export function StockSheet() {
       ...values,
       "eq-cup-9": { ...values["eq-cup-9"], sold: cupNineSold() },
     };
-    const next = rolloverValues(rolloverSource);
+    const next = rolloverValues(rolloverSource, groups.flatMap((g) => g.rows));
     const nextDate = startOfDay(new Date(date.getTime() + 86_400_000));
     try {
       const existing = await fetchSheet(nextDate);
@@ -445,9 +481,22 @@ export function StockSheet() {
               </tr>
             </thead>
             <tbody>
-              {GROUPS.map((group) => {
+              {groups.map((group, gi) => {
                 return (
                   <Fragment key={group.supplier}>
+                    {group.rows.length === 0 && (
+                      <tr>
+                        <td className="sheet-td text-start font-medium">
+                          {group.supplier}
+                          {!exporting && (
+                            <button type="button" onClick={() => addItem(gi)} className="ml-1 text-primary print:hidden" aria-label="เพิ่มรายการ">
+                              <Plus className="inline size-3.5" />
+                            </button>
+                          )}
+                        </td>
+                        <td className="sheet-td" colSpan={13} />
+                      </tr>
+                    )}
                     {group.rows.map((row, i) => (
                       <tr key={row.id}>
                         {i === 0 && (
@@ -456,6 +505,11 @@ export function StockSheet() {
                             className="sheet-td align-top text-start font-medium"
                           >
                             {group.supplier}
+                            {!exporting && (
+                              <button type="button" onClick={() => addItem(gi)} className="ml-1 text-primary print:hidden" aria-label="เพิ่มรายการ">
+                                <Plus className="inline size-3.5" />
+                              </button>
+                            )}
                           </td>
                         )}
                         <td
@@ -470,6 +524,11 @@ export function StockSheet() {
                             </div>
                           ) : (
                             row.name
+                          )}
+                          {!exporting && (
+                            <button type="button" onClick={() => removeItem(row)} className="ml-1 text-destructive print:hidden" aria-label="ลบรายการ">
+                              <X className="inline size-3" />
+                            </button>
                           )}
                         </td>
                         {!row.spanUnit && (
