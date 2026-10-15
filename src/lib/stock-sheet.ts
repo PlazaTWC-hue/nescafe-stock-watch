@@ -165,19 +165,26 @@ export const displayCell = (row: Row, r: Cells | undefined, col: ColKey): string
 };
 
 /** การปรับรายการสินค้า: เพิ่มรายการใหม่ / ซ่อนรายการเดิม (ใช้ร่วมกันทุกเครื่อง) */
-export type LayoutEntry = { id: string; g?: string; n?: string; u?: string; x?: string };
+export type LayoutEntry = { id: string; g?: string; n?: string; u?: string; x?: string; o?: string };
 
 export const buildGroups = (layout: LayoutEntry[]): Group[] => {
   const removed = new Set(layout.filter((l) => l.x === "1").map((l) => l.id));
-  return GROUPS.map((g, gi) => ({
-    ...g,
-    rows: [
+  return GROUPS.map((g, gi) => {
+    const rows = [
       ...g.rows,
       ...layout
         .filter((l) => l.g === String(gi) && l.n)
         .map((l) => ({ id: l.id, name: l.n!, unit: l.u || "ชิ้น", countFront: true }) as Row),
-    ].filter((r) => !removed.has(r.id)),
-  }));
+    ].filter((r) => !removed.has(r.id));
+    const order = (layout.find((l) => l.id === `order-${gi}`)?.o ?? "").split(",").filter(Boolean);
+    const rank = (id: string) => {
+      const i = order.indexOf(id);
+      return i < 0 ? 1e6 : i;
+    };
+    const idx = new Map(rows.map((r, i) => [r.id, i]));
+    rows.sort((a, b) => rank(a.id) - rank(b.id) || idx.get(a.id)! - idx.get(b.id)!);
+    return { ...g, rows };
+  });
 };
 
 /** โยกสต็อกไปวันถัดไป: คงเหลือ -> ยกมา, คงเหลือหน้าร้าน -> ยกมาหน้าร้าน */
