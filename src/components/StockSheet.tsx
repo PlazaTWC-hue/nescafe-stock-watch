@@ -111,10 +111,13 @@ export function StockSheet() {
 
   const [editing, setEditing] = useState(false);
   const moveItem = (gi: number, i: number, dir: -1 | 1) => {
-    const ids = groups[gi].rows.map((r) => r.id);
+    const ids = (groups[gi]?.rows ?? []).map((r) => r.id);
     const j = i + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const a = ids[i];
+    const b = ids[j];
+    if (a === undefined || b === undefined) return;
+    ids[i] = b;
+    ids[j] = a;
     void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
   };
 
