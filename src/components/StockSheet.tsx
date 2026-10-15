@@ -109,6 +109,18 @@ export function StockSheet() {
     toast.success(`เพิ่ม "${n}" แล้ว`);
   };
 
+  const [editing, setEditing] = useState(false);
+  const moveItem = (gi: number, i: number, dir: -1 | 1) => {
+    const ids = (groups[gi]?.rows ?? []).map((r) => r.id);
+    const j = i + dir;
+    const a = ids[i];
+    const b = ids[j];
+    if (a === undefined || b === undefined) return;
+    ids[i] = b;
+    ids[j] = a;
+    void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
+  };
+
   const removeItem = (row: Row) => {
     if (!window.confirm(`ลบรายการ "${row.name}" ออกจากตาราง?`)) return;
     const own = layout.find((l) => l.id === row.id);
@@ -366,6 +378,9 @@ export function StockSheet() {
   return (
     <div className="mx-auto max-w-[1180px] px-3 py-6 sm:px-6 print:max-w-none print:p-0">
       <div className="mb-4 flex flex-wrap items-center gap-2 print:hidden">
+        <Button variant={editing ? "default" : "outline"} onClick={() => setEditing((v) => !v)}>
+          {editing ? "เสร็จสิ้น" : "แก้ไขรายการ"}
+        </Button>
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline">
@@ -488,7 +503,7 @@ export function StockSheet() {
                       <tr>
                         <td className="sheet-td text-start font-medium">
                           {group.supplier}
-                          {!exporting && (
+                          {editing && !exporting && (
                             <button type="button" onClick={() => addItem(gi)} className="ml-1 text-primary print:hidden" aria-label="เพิ่มรายการ">
                               <Plus className="inline size-3.5" />
                             </button>
@@ -505,7 +520,7 @@ export function StockSheet() {
                             className="sheet-td align-top text-start font-medium"
                           >
                             {group.supplier}
-                            {!exporting && (
+                            {editing && !exporting && (
                               <button type="button" onClick={() => addItem(gi)} className="ml-1 text-primary print:hidden" aria-label="เพิ่มรายการ">
                                 <Plus className="inline size-3.5" />
                               </button>
@@ -525,10 +540,14 @@ export function StockSheet() {
                           ) : (
                             row.name
                           )}
-                          {!exporting && (
-                            <button type="button" onClick={() => removeItem(row)} className="ml-1 text-destructive print:hidden" aria-label="ลบรายการ">
-                              <X className="inline size-3" />
-                            </button>
+                          {editing && !exporting && (
+                            <span className="ml-1 inline-flex items-center gap-0.5 print:hidden">
+                              <button type="button" disabled={i === 0} onClick={() => moveItem(gi, i, -1)} className="rounded border px-1 text-xs disabled:opacity-30" aria-label="เลื่อนขึ้น">▲</button>
+                              <button type="button" disabled={i === group.rows.length - 1} onClick={() => moveItem(gi, i, 1)} className="rounded border px-1 text-xs disabled:opacity-30" aria-label="เลื่อนลง">▼</button>
+                              <button type="button" onClick={() => removeItem(row)} className="text-destructive" aria-label="ลบรายการ">
+                                <X className="inline size-3" />
+                              </button>
+                            </span>
                           )}
                         </td>
                         {!row.spanUnit && (
