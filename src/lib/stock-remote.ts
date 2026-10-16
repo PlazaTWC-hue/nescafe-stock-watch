@@ -92,3 +92,22 @@ export const saveLayoutEntry = async (e: LayoutEntry) => {
     .upsert({ sheet_date: LAYOUT_DATE, row_id: `cfg-${id}`, cells }, { onConflict: "sheet_date,row_id" });
   if (error) throw error;
 };
+
+/** ฟังการเปลี่ยนแปลงรายการสินค้า/ลำดับ แบบเรียลไทม์ (ทุกเครื่องเห็นตรงกัน) */
+export const subscribeLayout = (onChange: (e: LayoutEntry) => void) => {
+  const channel = supabase
+    .channel(`stock_layout:${Math.random().toString(36).slice(2)}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "stock_entries", filter: `sheet_date=eq.${LAYOUT_DATE}` },
+      (payload) => {
+        const row = payload.new as { row_id?: string; cells?: Record<string, string> } | null;
+        if (!row?.row_id?.startsWith("cfg-")) return;
+        onChange({ ...(row.cells ?? {}), id: row.row_id.slice(4) });
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+};

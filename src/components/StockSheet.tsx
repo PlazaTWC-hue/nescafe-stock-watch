@@ -20,7 +20,7 @@ import {
   rolloverValues,
   thaiParts,
 } from "@/lib/stock-sheet";
-import { fetchLayout, fetchSheet, saveLayoutEntry, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
+import { fetchLayout, fetchSheet, saveLayoutEntry, subscribeLayout, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
 import { ExpiryTracker } from "@/components/ExpiryTracker";
 import { compressImage } from "@/lib/image-compress";
 import { scanReceiptFn } from "@/lib/receipt-scan.functions";
@@ -83,7 +83,18 @@ export function StockSheet() {
   // รายการสินค้าที่เพิ่ม/ลบเอง (ใช้ร่วมกันทุกเครื่อง)
   const [layout, setLayout] = useState<LayoutEntry[]>([]);
   useEffect(() => {
-    fetchLayout().then(setLayout).catch(() => toast.error("โหลดรายการสินค้าไม่สำเร็จ"));
+    const load = () => fetchLayout().then(setLayout).catch(() => toast.error("โหลดรายการสินค้าไม่สำเร็จ"));
+    void load();
+    const unsub = subscribeLayout((e) => setLayout((prev) => [...prev.filter((l) => l.id !== e.id), e]));
+    // สำรอง: รีเฟรชทุก 15 วินาที และเมื่อกลับมาที่หน้าเว็บ
+    const t = window.setInterval(load, 15000);
+    const onVis = () => document.visibilityState === "visible" && void load();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      unsub();
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
   const groups = useMemo(() => buildGroups(layout), [layout]);
 
@@ -120,6 +131,58 @@ export function StockSheet() {
     ids[j] = a;
     void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
   };
+
+  // กดค้างเพื่อเลือกรายการ แล้วแตะอีกรายการเพื่อสลับตำแหน่ง
+  const [picked, setPicked] = useState<{ gi: number; i: number } | null>(null);
+  const holdTimer = useRef<number | null>(null);
+  const startHold = (gi: number, i: number) => {
+    if (!editing) return;
+    if (holdTimer.current) window.clearTimeout(holdTimer.current);
+    holdTimer.current = window.setTimeout(() => {
+      setPicked({ gi, i });
+      navigator.vibrate?.(30);
+      toast("เลือกแล้ว — แตะรายการที่ต้องการสลับตำแหน่ง");
+    }, 500);
+  };
+  const cancelHold = () => {
+    if (holdTimer.current) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  const tapRow = (gi: number, i: number) => {
+    if (!editing || !picked) return;
+    if (picked.gi === gi && picked.i === i) return;
+    if (picked.gi !== gi) {
+      toast.error("สลับได้เฉพาะรายการในหมวดเดียวกัน");
+      setPicked(null);
+      return;
+    }
+    const ids = (groups[gi]?.rows ?? []).map((r) => r.id);
+    const a = ids[picked.i];
+    const b = ids[i];
+    if (a && b) {
+      ids[picked.i] = b;
+      ids[i] = a;
+      void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
+    }
+    setPicked(null);
+  };
+
+  // ย้าย "น้ำแร่ช้าง" ไปไว้ใต้ "น้ำทิพย์" (ทำครั้งเดียว บันทึกให้ทุกเครื่อง)
+  useEffect(() => {
+    if (!layout.length || layout.some((l) => l.id === "fix-chang")) return;
+    const chang = layout.find((l) => l.n?.includes("น้ำแร่ช้าง") && l.x !== "1");
+    if (!chang) return;
+    const gi = GROUPS.findIndex((g) => g.rows.some((r) => r.id === "eq-water"));
+    if (gi < 0) return;
+    const fixed = { ...chang, g: String(gi) };
+    const next = [...layout.filter((l) => l.id !== chang.id), fixed];
+    const ids = (buildGroups(next)[gi]?.rows ?? []).map((r) => r.id).filter((id) => id !== chang.id);
+    ids.splice(ids.indexOf("eq-water") + 1, 0, chang.id);
+    void updateLayout(fixed);
+    void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
+    void updateLayout({ id: "fix-chang", o: "1" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout]);
 
   const removeItem = (row: Row) => {
     if (!window.confirm(`ลบรายการ "${row.name}" ออกจากตาราง?`)) return;
@@ -529,7 +592,12 @@ export function StockSheet() {
                         )}
                         <td
                           colSpan={row.spanUnit ? 2 : 1}
-                          className={`sheet-td text-start ${row.italic ? "italic" : ""}`}
+                          className={`sheet-td text-start ${row.italic ? "italic" : ""} ${editing ? "cursor-pointer select-none" : ""} ${picked?.gi === gi && picked.i === i ? "bg-primary/20 ring-2 ring-primary" : ""}`}
+                          onPointerDown={() => startHold(gi, i)}
+                          onPointerUp={cancelHold}
+                          onPointerLeave={cancelHold}
+                          onContextMenu={(e) => editing && e.preventDefault()}
+                          onClick={() => tapRow(gi, i)}
                         >
                           {row.names ? (
                             <div className="flex flex-col gap-0.5">
