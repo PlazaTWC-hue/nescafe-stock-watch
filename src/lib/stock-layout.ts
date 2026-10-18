@@ -16,10 +16,15 @@ export function encodeLayout(entry: LayoutEntry): Record<string, string> {
 }
 
 export function decodeLayout(id: string, cells: Record<string, string>): LayoutEntry {
-  const { g, n, u, x } = cells;
-  let o = cells.o;
+  const entry: LayoutEntry = { id };
+  for (const key of ["g", "n", "u", "x"] as const) {
+    const value = cells[key];
+    if (value !== undefined) entry[key] = value;
+  }
+  let o = cells['o'];
   if (o !== undefined) {
     for (let i = 1; cells[`o${i}`] !== undefined; i++) o += cells[`o${i}`];
   }
-  return { id, g, n, u, x, o };
+  if (o !== undefined) entry.o = o;
+  return entry;
 }
