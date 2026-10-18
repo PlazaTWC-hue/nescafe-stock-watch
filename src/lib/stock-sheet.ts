@@ -174,7 +174,7 @@ export const buildGroups = (layout: LayoutEntry[]): Group[] => {
       ...g.rows,
       ...layout
         .filter((l) => l.g === String(gi) && l.n)
-        .map((l) => ({ id: l.id, name: l.n!, unit: l.u || "ชิ้น", countFront: true }) as Row),
+        .map((l) => ({ id: l.id, name: l.n ?? "", unit: l.u || "ชิ้น", countFront: true }) as Row),
     ].filter((r) => !removed.has(r.id));
     const order = (layout.find((l) => l.id === `order-${gi}`)?.o ?? "").split(",").filter(Boolean);
     const rank = (id: string) => {
@@ -182,7 +182,7 @@ export const buildGroups = (layout: LayoutEntry[]): Group[] => {
       return i < 0 ? 1e6 : i;
     };
     const idx = new Map(rows.map((r, i) => [r.id, i]));
-    rows.sort((a, b) => rank(a.id) - rank(b.id) || idx.get(a.id)! - idx.get(b.id)!);
+    rows.sort((a, b) => rank(a.id) - rank(b.id) || (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0));
     return { ...g, rows };
   });
 };

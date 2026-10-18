@@ -5,6 +5,8 @@ import { StockSheet } from "@/components/StockSheet";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { title: "แบบบันทึก STOCK วัตถุดิบ — ฝ่ายพลาซ่า สาขาสระบุรี" },
       {
         name: "description",
