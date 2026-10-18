@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 import { dateKey, type LayoutEntry, type SheetValues } from "./stock-sheet";
+import { decodeLayout, encodeLayout } from "./stock-layout";
 
 type EntryRow = {
   sheet_date: string;
@@ -82,14 +83,17 @@ export const fetchLayout = async (): Promise<LayoutEntry[]> => {
   if (error) throw error;
   return ((data ?? []) as { row_id: string; cells: Record<string, string> | null }[])
     .filter((r) => r.row_id.startsWith("cfg-"))
-    .map((r) => ({ ...(r.cells ?? {}), id: r.row_id.slice(4) }));
+    .map((r) => decodeLayout(r.row_id.slice(4), r.cells ?? {}));
 };
 
 export const saveLayoutEntry = async (e: LayoutEntry) => {
-  const { id, ...cells } = e;
+  return saveLayoutEntries([e]);
+};
+
+export const saveLayoutEntries = async (entries: LayoutEntry[]) => {
   const { error } = await supabase
     .from("stock_entries")
-    .upsert({ sheet_date: LAYOUT_DATE, row_id: `cfg-${id}`, cells }, { onConflict: "sheet_date,row_id" });
+    .upsert(entries.map(e => ({ sheet_date: LAYOUT_DATE, row_id: `cfg-${e.id}`, cells: encodeLayout(e) })), { onConflict: "sheet_date,row_id" });
   if (error) throw error;
 };
 
@@ -103,7 +107,7 @@ export const subscribeLayout = (onChange: (e: LayoutEntry) => void) => {
       (payload) => {
         const row = payload.new as { row_id?: string; cells?: Record<string, string> } | null;
         if (!row?.row_id?.startsWith("cfg-")) return;
-        onChange({ ...(row.cells ?? {}), id: row.row_id.slice(4) });
+        onChange(decodeLayout(row.row_id.slice(4), row.cells ?? {}));
       },
     )
     .subscribe();

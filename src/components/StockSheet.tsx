@@ -20,7 +20,7 @@ import {
   rolloverValues,
   thaiParts,
 } from "@/lib/stock-sheet";
-import { fetchLayout, fetchSheet, saveLayoutEntry, subscribeLayout, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
+import { fetchLayout, fetchSheet, saveLayoutEntries, subscribeLayout, saveRow, saveSheetRows, subscribeSheet } from "@/lib/stock-remote";
 import { ExpiryTracker } from "@/components/ExpiryTracker";
 import { compressImage } from "@/lib/image-compress";
 import { scanReceiptFn } from "@/lib/receipt-scan.functions";
@@ -82,15 +82,31 @@ export function StockSheet() {
 
   // รายการสินค้าที่เพิ่ม/ลบเอง (ใช้ร่วมกันทุกเครื่อง)
   const [layout, setLayout] = useState<LayoutEntry[]>([]);
+  const pendingLayout = useRef(new Map<string, LayoutEntry>());
+  const layoutQueue = useRef<Promise<void>>(Promise.resolve());
+  const layoutRevision = useRef(0);
   useEffect(() => {
-    const load = () => fetchLayout().then(setLayout).catch(() => toast.error("โหลดรายการสินค้าไม่สำเร็จ"));
+    let alive = true;
+    const load = async () => {
+      const revision = layoutRevision.current;
+      try {
+        const remote = await fetchLayout();
+        if (!alive || revision !== layoutRevision.current) return;
+        setLayout([...remote.filter(e => !pendingLayout.current.has(e.id)), ...pendingLayout.current.values()]);
+      } catch { if (alive) toast.error("โหลดรายการสินค้าไม่สำเร็จ"); }
+    };
     void load();
-    const unsub = subscribeLayout((e) => setLayout((prev) => [...prev.filter((l) => l.id !== e.id), e]));
+    const unsub = subscribeLayout((e) => {
+      if (pendingLayout.current.has(e.id)) return;
+      layoutRevision.current++;
+      setLayout((prev) => [...prev.filter((l) => l.id !== e.id), e]);
+    });
     // สำรอง: รีเฟรชทุก 15 วินาที และเมื่อกลับมาที่หน้าเว็บ
     const t = window.setInterval(load, 15000);
     const onVis = () => document.visibilityState === "visible" && void load();
     document.addEventListener("visibilitychange", onVis);
     return () => {
+      alive = false;
       unsub();
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", onVis);
@@ -98,14 +114,26 @@ export function StockSheet() {
   }, []);
   const groups = useMemo(() => buildGroups(layout), [layout]);
 
-  const updateLayout = async (e: LayoutEntry) => {
-    setLayout((prev) => [...prev.filter((l) => l.id !== e.id), e]);
-    try {
-      await saveLayoutEntry(e);
-    } catch {
-      toast.error("บันทึกรายการสินค้าไม่สำเร็จ");
-    }
+  const updateLayouts = (entries: LayoutEntry[]) => {
+    layoutRevision.current++;
+    entries.forEach(e => pendingLayout.current.set(e.id, e));
+    setLayout(prev => [...prev.filter(l => !entries.some(e => e.id === l.id)), ...entries]);
+    const task = layoutQueue.current.then(async () => {
+      try {
+        await saveLayoutEntries(entries);
+        return true;
+      } catch {
+        toast.error("บันทึกรายการสินค้าไม่สำเร็จ กรุณาลองใหม่");
+        return false;
+      } finally {
+        entries.forEach(e => { if (pendingLayout.current.get(e.id) === e) pendingLayout.current.delete(e.id); });
+        layoutRevision.current++;
+      }
+    });
+    layoutQueue.current = task.then(() => undefined);
+    return task;
   };
+  const updateLayout = (e: LayoutEntry) => updateLayouts([e]);
 
   const addItem = (gi: number) => {
     const n = window.prompt(`เพิ่มรายการในหมวด "${GROUPS[gi]?.supplier ?? ""}"\nชื่อสินค้า:`)?.trim();
@@ -167,9 +195,10 @@ export function StockSheet() {
     setPicked(null);
   };
 
-  // ย้าย "น้ำแร่ช้าง" ไปไว้ใต้ "น้ำทิพย์" (ทำครั้งเดียว บันทึกให้ทุกเครื่อง)
+  // Repair the earlier placement only after the complete order is saved successfully.
+  const fixingChang = useRef(false);
   useEffect(() => {
-    if (!layout.length || layout.some((l) => l.id === "fix-chang")) return;
+    if (!layout.length || fixingChang.current || layout.some((l) => l.id === "fix-chang-v2")) return;
     const chang = layout.find((l) => l.n?.includes("น้ำแร่ช้าง") && l.x !== "1");
     if (!chang) return;
     const gi = GROUPS.findIndex((g) => g.rows.some((r) => r.id === "eq-water"));
@@ -178,9 +207,8 @@ export function StockSheet() {
     const next = [...layout.filter((l) => l.id !== chang.id), fixed];
     const ids = (buildGroups(next)[gi]?.rows ?? []).map((r) => r.id).filter((id) => id !== chang.id);
     ids.splice(ids.indexOf("eq-water") + 1, 0, chang.id);
-    void updateLayout(fixed);
-    void updateLayout({ id: `order-${gi}`, o: ids.join(",") });
-    void updateLayout({ id: "fix-chang", o: "1" });
+    fixingChang.current = true;
+    void updateLayouts([fixed, { id: `order-${gi}`, o: ids.join(",") }, { id: "fix-chang-v2", o: "1" }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout]);
 
